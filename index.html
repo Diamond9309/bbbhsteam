@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam 家庭组登录</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #1b2838 0%, #2a475e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+        .card {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 420px;
+            width: 90%;
+            text-align: center;
+        }
+        .logo {
+            width: 64px; height: 64px;
+            background: #171a21;
+            border-radius: 12px;
+            margin: 0 auto 20px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px;
+        }
+        h1 { font-size: 20px; margin-bottom: 8px; }
+        p { color: #8f98a0; font-size: 14px; margin-bottom: 24px; line-height: 1.6; }
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: #1a9fff; color: #fff;
+            border: none; padding: 12px 24px;
+            border-radius: 8px; font-size: 15px; font-weight: 600;
+            cursor: pointer; text-decoration: none;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #1188d8; }
+        .status {
+            margin-top: 20px; padding: 12px;
+            border-radius: 8px; font-size: 13px;
+            display: none;
+        }
+        .status.show { display: block; }
+        .status.loading { background: rgba(26,159,255,0.15); color: #1a9fff; }
+        .status.success { background: rgba(76,175,80,0.15); color: #4caf50; }
+        .status.error { background: rgba(244,67,54,0.15); color: #f44336; }
+        .steam-id { font-family: monospace; background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px; margin-top: 8px; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">🎮</div>
+        <h1>Steam 家庭组登录</h1>
+        <p>点击登录，自动绑定你的 SteamID 到 AI 表格</p>
+        
+        <a id="loginBtn" class="btn" href="#">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+            通过 Steam 登录
+        </a>
+        
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        // ==================== 唯一要改的地方 ====================
+        const WEBHOOK_URL = "https://connector.dingtalk.com/webhook/flow/xxxxxxxxxxxxxxxx";
+        // 把上面这行换成你从 AI 表格自动化里复制的 Webhook 地址
+        // =====================================================
+
+        const statusEl = document.getElementById('status');
+        const loginBtn = document.getElementById('loginBtn');
+
+        function showStatus(msg, type) {
+            statusEl.className = 'status show ' + type;
+            statusEl.innerHTML = msg;
+        }
+
+        // 检查当前 URL 是否是 Steam 回调
+        const urlParams = new URLSearchParams(window.location.search);
+        const identity = urlParams.get('openid.identity');
+        const mode = urlParams.get('openid.mode');
+
+        if (identity && mode === 'id_res') {
+            // 是 Steam 回调！
+            loginBtn.style.display = 'none';
+            
+            const steamId64 = identity.split('/').pop();
+            
+            showStatus(
+                '已获取 SteamID：<span class="steam-id">' + steamId64 + '</span><br>正在同步到 AI 表格...',
+                'loading'
+            );
+
+            // POST 到 AI 表格 Webhook
+            fetch(WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    steam_id: steamId64,
+                    source: 'steam_login_page'
+                })
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.text();
+            })
+            .then(() => {
+                showStatus(
+                    '✅ 同步成功！<<br>SteamID：<span class="steam-id">' + steamId64 + '</span><br>请关闭此页面，回到 AI 表格查看。',
+                    'success'
+                );
+            })
+            .catch(err => {
+                showStatus(
+                    '❌ 同步失败：' + err.message + '<br>请检查 Webhook 地址是否正确',
+                    'error'
+                );
+            });
+
+        } else {
+            // 不是回调，显示登录按钮
+            const returnTo = window.location.href.split('?')[0]; // 去掉可能的旧参数
+            const realm = window.location.origin;
+            
+            const params = new URLSearchParams({
+                'openid.ns': 'http://specs.openid.net/auth/2.0',
+                'openid.mode': 'checkid_setup',
+                'openid.return_to': returnTo,
+                'openid.realm': realm,
+                'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
+                'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select'
+            });
+            
+            loginBtn.href = 'https://steamcommunity.com/openid/login?' + params.toString();
+        }
+    </script>
+</body>
+</html>
